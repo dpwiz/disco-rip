@@ -62,5 +62,6 @@ library
     , random
     , stm
     , text
+    , unix
     , uuid
   default-language: GHC2021

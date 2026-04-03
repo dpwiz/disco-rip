@@ -7,11 +7,13 @@ module DiscoRip.Command
   , ActivityButton(..)
   , SetActivityArgs(..)
   , setActivity
+  , mkActivity
   ) where
 
 import Data.Aeson
 import Data.Text (Text)
 import GHC.Generics (Generic)
+import System.Posix.Process (getProcessID)
 
 import DiscoRip.Client
 import DiscoRip.Message
@@ -60,6 +62,18 @@ data Activity = Activity
   , buttons :: Maybe [ActivityButton]
   } deriving stock (Show, Eq, Generic)
 
+mkActivity :: Text -> Maybe Text -> Activity
+mkActivity st det = Activity
+  { state = Just st
+  , details = det
+  , timestamps = Nothing
+  , assets = Nothing
+  , party = Nothing
+  , secrets = Nothing
+  , instance_ = Nothing
+  , buttons = Nothing
+  }
+
 instance ToJSON Activity where
   toJSON a = object $ filter (\(_, v) -> v /= Null)
     [ "state" .= state a
@@ -89,7 +103,10 @@ data SetActivityArgs = SetActivityArgs
   } deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
-setActivity :: Handle -> SetActivityArgs -> IO Response
-setActivity h args = call h req
-  where
+setActivity :: Handle -> Activity -> IO Response
+setActivity h act = do
+  pidNum <- getProcessID
+  let
+    args = SetActivityArgs (fromIntegral pidNum) act
     req = Request "SET_ACTIVITY" (toJSON args) ""
+  call h req

@@ -28,23 +28,21 @@ main = do
   threadDelay 1000000
 
   -- 2. Define the activity you want to display
-  let myActivity = Activity
-        { state = Just "Exploring the Codebase"
-        , details = Just "Writing Haskell"
-        , timestamps = Just (ActivityTimestamps (Just 1600000000) Nothing)
-        , assets = Just (ActivityAssets (Just "haskell_logo") (Just "Haskell") Nothing Nothing)
-        , party = Nothing
-        , secrets = Nothing
-        , instance_ = Just False
-        , buttons = Just [ActivityButton "View Source" "https://github.com/dpwiz/disco-rip"]
-        }
+  -- Use mkActivity to quickly create an Activity with just state and optional details
+  let
+    baseActivity = mkActivity "Exploring the Codebase" (Just "Writing Haskell")
+    myActivity = baseActivity
+      { timestamps = Just (ActivityTimestamps (Just 1600000000) Nothing)
+      , assets = Just (ActivityAssets (Just "haskell_logo") (Just "Haskell") Nothing Nothing)
+      , instance_ = Just False
+      , buttons = Just [ActivityButton "View Source" "https://github.com/dpwiz/disco-rip"]
+      }
 
   -- 3. Send the command to Discord
-  -- Assuming your process ID is 12345
-  let args = SetActivityArgs 12345 myActivity
-
-  -- The call function blocks until Discord responds to the command
-  response <- setActivity handle args
+  -- The `setActivity` function will automatically fetch your process ID
+  -- and package the request. The call function blocks until Discord
+  -- responds to the command.
+  response <- setActivity handle myActivity
   print response
 
   -- Alternatively, listen for any raw events coming from Discord

@@ -33,6 +33,7 @@ dependencies:
 - stm
 - text
 - uuid
+- unix
 
 library:
   source-dirs: src
