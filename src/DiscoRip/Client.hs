@@ -43,14 +43,16 @@ startClient clientId = do
   let
     castImpl req = do
       uuid <- nextRandom
-      let nonce = T.pack (show uuid)
-          req' = req { reqNonce = nonce }
+      let
+        nonce = T.pack (show uuid)
+        req' = req { reqNonce = nonce }
       atomically $ writeTBQueue writeQ req'
 
     callImpl req = do
       uuid <- nextRandom
-      let nonce = T.pack (show uuid)
-          req' = req { reqNonce = nonce }
+      let
+        nonce = T.pack (show uuid)
+        req' = req { reqNonce = nonce }
 
       atomically $ writeTBQueue writeQ req'
       replyVar <- newTVarIO undefined
@@ -63,7 +65,7 @@ startClient clientId = do
       atomically $ readTVar calls >>= popOrRetry nonce >>= writeTVar calls
       readTVarIO replyVar
 
-  pure $ Handle
+  pure Handle
     { clientAsync = workerAsync
     , cast = castImpl
     , call = callImpl
@@ -82,7 +84,8 @@ workerLoop clientId writeQ calls events = forever $ do
         (connectIpc path)
         close
         (\sock -> do
-          let hs = DiscoRip.Message.Handshake 1 clientId
+          let
+            hs = DiscoRip.Message.Handshake 1 clientId
           writeFrame sock Frame.Handshake (encode hs)
 
           -- After handshake, start reading and writing concurrently.
@@ -101,9 +104,10 @@ readerLoop sock calls events = forever $ do
       -- Try to parse as Response first
       case eitherDecode payload of
         Right (res :: Response) ->
-          if T.null (resNonce res)
-          then tryParseEvent payload
-          else atomically $ modifyTVar' calls $ Map.insert (resNonce res) res
+          if T.null (resNonce res) then
+            tryParseEvent payload
+          else
+            atomically $ modifyTVar' calls $ Map.insert (resNonce res) res
         Left _ -> tryParseEvent payload
     Close -> error "Discord requested close"
     Ping -> do

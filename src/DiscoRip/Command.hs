@@ -1,12 +1,12 @@
 module DiscoRip.Command
-  ( setActivity
-  , Activity(..)
+  ( Activity(..)
   , ActivityTimestamps(..)
   , ActivityAssets(..)
   , ActivityParty(..)
   , ActivitySecrets(..)
   , ActivityButton(..)
   , SetActivityArgs(..)
+  , setActivity
   ) where
 
 import Data.Aeson
@@ -90,6 +90,6 @@ data SetActivityArgs = SetActivityArgs
   deriving anyclass (ToJSON, FromJSON)
 
 setActivity :: Handle -> SetActivityArgs -> IO Response
-setActivity h args = do
-  let req = Request "SET_ACTIVITY" (toJSON args) ""
-  call h req
+setActivity h args = call h req
+  where
+    req = Request "SET_ACTIVITY" (toJSON args) ""

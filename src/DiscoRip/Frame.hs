@@ -11,9 +11,11 @@ import Data.Binary (Binary(..), encode, decodeOrFail)
 import Data.Binary.Get (getWord32le)
 import Data.Binary.Put (putWord32le)
 import Data.ByteString.Lazy qualified as BL
+import Data.ByteString qualified as BS
 import Data.Word (Word32)
 import Network.Socket (Socket)
-import Network.Socket.ByteString.Lazy (sendAll, recv)
+import Network.Socket.ByteString.Lazy (sendAll)
+import Network.Socket.ByteString (recv)
 
 data Opcode
   = Handshake
@@ -52,26 +54,16 @@ instance Binary FrameHeader where
   get = FrameHeader <$> get <*> getWord32le
 
 encodeFrame :: Opcode -> BL.ByteString -> BL.ByteString
-encodeFrame op payload =
-  let len = fromIntegral (BL.length payload)
-      header = encode (FrameHeader op len)
-   in header <> payload
+encodeFrame op payload = header <> payload
+  where
+    len = fromIntegral (BL.length payload)
+    header = encode (FrameHeader op len)
 
 decodeFrameHeader :: BL.ByteString -> Either String (FrameHeader, BL.ByteString)
 decodeFrameHeader bs =
   case decodeOrFail bs of
     Left (_, _, err) -> Left err
     Right (rest, _, header) -> Right (header, rest)
-
-recvExactly :: Socket -> Int -> IO BL.ByteString
-recvExactly sock n = go n mempty
-  where
-    go 0 acc = pure (BL.fromChunks (reverse acc))
-    go k acc = do
-      chunk <- recv sock (fromIntegral k)
-      if BL.null chunk
-        then error "Socket closed unexpectedly while receiving"
-        else go (k - fromIntegral (BL.length chunk)) (BL.toStrict chunk : acc)
 
 readFrame :: Socket -> IO (Opcode, BL.ByteString)
 readFrame sock = do
@@ -84,5 +76,17 @@ readFrame sock = do
 
 writeFrame :: Socket -> Opcode -> BL.ByteString -> IO ()
 writeFrame sock op payload = do
-  let frame = encodeFrame op payload
+  let
+    frame = encodeFrame op payload
   sendAll sock frame
+
+recvExactly :: Socket -> Int -> IO BL.ByteString
+recvExactly sock n = go n mempty
+  where
+    go 0 acc = pure (BL.fromChunks (reverse acc))
+    go k acc = do
+      chunk <- recv sock k
+      if BS.null chunk then
+        error "Socket closed unexpectedly while receiving"
+      else
+        go (k - BS.length chunk) (chunk : acc)
