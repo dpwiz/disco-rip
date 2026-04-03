@@ -65,6 +65,11 @@ library
     , random
     , stm
     , text
-    , unix
     , uuid
   default-language: GHC2021
+  if os(windows)
+    build-depends:
+        Win32
+  if !os(windows)
+    build-depends:
+        unix

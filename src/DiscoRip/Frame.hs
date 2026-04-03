@@ -14,9 +14,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.ByteString.Lazy.Internal qualified as BLI
 import Data.ByteString qualified as BS
 import Data.Word (Word32)
-import Network.Socket (Socket)
-import Network.Socket.ByteString.Lazy (sendAll)
-import Network.Socket.ByteString (recv)
+import System.IO (Handle)
 
 data Opcode
   = Handshake
@@ -66,26 +64,26 @@ decodeFrameHeader bs =
     Left (_, _, err) -> Left err
     Right (rest, _, header) -> Right (header, rest)
 
-readFrame :: Socket -> IO (Opcode, BL.ByteString)
-readFrame sock = do
-  headerBytes <- recvExactly sock 8
+readFrame :: Handle -> IO (Opcode, BL.ByteString)
+readFrame h = do
+  headerBytes <- recvExactly h 8
   case decodeFrameHeader headerBytes of
     Left err -> error $ "Failed to decode frame header: " <> err
     Right (FrameHeader op len, _) -> do
-      payload <- recvExactly sock (fromIntegral len)
+      payload <- recvExactly h (fromIntegral len)
       pure (op, payload)
 
-writeFrame :: Socket -> Opcode -> BL.ByteString -> IO ()
-writeFrame sock op = sendAll sock . encodeFrame op
+writeFrame :: Handle -> Opcode -> BL.ByteString -> IO ()
+writeFrame h op = BL.hPut h . encodeFrame op
 
-recvExactly :: Socket -> Int -> IO BL.ByteString
-recvExactly sock n = go n
+recvExactly :: Handle -> Int -> IO BL.ByteString
+recvExactly h n = go n
   where
     go 0 = pure BLI.Empty
     go k = do
-      chunk <- recv sock k
+      chunk <- BS.hGetSome h k
       if BS.null chunk then
-        error "Socket closed unexpectedly while receiving"
+        error "Handle closed unexpectedly while receiving"
       else do
         rest <- go (k - BS.length chunk)
         pure (BLI.Chunk chunk rest)

@@ -13,9 +13,6 @@ extra-source-files:
 synopsis: Discord RPC client, mostly for RichPresence
 category: Web
 
-# description: |
-#
-
 dependencies:
 - aeson
 - async
@@ -29,8 +26,15 @@ dependencies:
 - random
 - stm
 - text
-- unix
 - uuid
+
+when:
+- condition: os(windows)
+  dependencies:
+  - Win32
+- condition: "!os(windows)"
+  dependencies:
+  - unix
 
 library:
   source-dirs: src

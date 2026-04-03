@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 module DiscoRip.Client
   ( ClientConfig(..)
@@ -21,13 +22,26 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.UUID.V4 (nextRandom)
 import Debug.Trace (traceM)
-import Network.Socket (close, Socket)
+import System.IO (hClose)
+import qualified System.IO as SIO
 
 import DiscoRip.Frame (readFrame, writeFrame, Opcode(..))
 import DiscoRip.Frame qualified as Frame
 import DiscoRip.Message qualified as Message
 import DiscoRip.Socket qualified as Socket
-import System.Posix (getProcessID)
+
+#if defined(mingw32_HOST_OS) || defined(__MINGW32__)
+import System.Win32.Process (getCurrentProcessId)
+#else
+import System.Posix.Process (getProcessID)
+#endif
+
+myGetProcessID :: IO Int
+#if defined(mingw32_HOST_OS) || defined(__MINGW32__)
+myGetProcessID = fromIntegral <$> getCurrentProcessId
+#else
+myGetProcessID = fromIntegral <$> getProcessID
+#endif
 
 data ClientConfig = ClientConfig
   { clientId :: Text
@@ -44,7 +58,7 @@ data Handle = Handle
 
 start :: ClientConfig -> (Message.Event -> IO ())-> IO Handle
 start config onEvent = do
-  pid <- fromIntegral <$> getProcessID
+  pid <- myGetProcessID
   calls <- newTVarIO (mempty :: Map Text Message.Response)
   writeQ <- newTBQueueIO 16
   readyVar <- newTVarIO False
@@ -110,21 +124,21 @@ workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
       traceLog config $ "Found IPC socket at: " <> path
       res <- try @SomeException $ bracket
         (Socket.connectIpc path)
-        (\sock -> do
+        (\h -> do
           traceLog config "Closing IPC socket connection."
           atomically $ writeTVar readyVar False
-          close sock)
-        (\sock -> do
+          hClose h)
+        (\h -> do
           traceLog config "Connected. Sending handshake."
           let
             hs = Message.Handshake 1 clientId
-          writeFrame sock Frame.Handshake (encode hs)
-          waitReadyEvent config sock onEvent
+          writeFrame h Frame.Handshake (encode hs)
+          waitReadyEvent config h onEvent
           atomically $ writeTVar readyVar True
 
           -- After handshake, start reading and writing concurrently.
           -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
-          race_ (readerLoop config sock calls onEvent) (writerLoop config sock readyVar writeQ)
+          race_ (readerLoop config h calls onEvent) (writerLoop config h readyVar writeQ)
         )
       case res of
         Left err -> do
@@ -135,10 +149,10 @@ workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
           traceLog config "Connection closed cleanly."
           pure ()
 
-waitReadyEvent :: ClientConfig -> Socket -> (Message.Event -> IO ()) -> IO ()
-waitReadyEvent config sock onEvent = do
+waitReadyEvent :: ClientConfig -> SIO.Handle -> (Message.Event -> IO ()) -> IO ()
+waitReadyEvent config h onEvent = do
   traceLog config "Waiting for READY event"
-  readFrame sock >>= \case
+  readFrame h >>= \case
     (Frame, payload) ->
       case eitherDecode payload of
         Right evt@Message.Event{evtEvt="READY"} -> do
@@ -149,9 +163,9 @@ waitReadyEvent config sock onEvent = do
     (op, payload) ->
       error $ show (op, payload)
 
-readerLoop :: ClientConfig -> Socket -> TVar (Map Text Message.Response) -> (Message.Event -> IO ()) -> IO ()
-readerLoop config sock calls onEvent = forever $ do
-  (op, payload) <- readFrame sock
+readerLoop :: ClientConfig -> SIO.Handle -> TVar (Map Text Message.Response) -> (Message.Event -> IO ()) -> IO ()
+readerLoop config h calls onEvent = forever $ do
+  (op, payload) <- readFrame h
   traceLog config $ "Received frame (Opcode: " <> show op <> ", size: " <> show (BSL.length payload) <> "): " <> show payload
   case op of
     Frame -> do
@@ -171,7 +185,7 @@ readerLoop config sock calls onEvent = forever $ do
     Ping -> do
       traceLog config "Received Ping, responding with Pong."
       -- respond with Pong
-      writeFrame sock Pong payload
+      writeFrame h Pong payload
     _ -> pure ()
   where
     tryParseEvent payload =
@@ -182,15 +196,15 @@ readerLoop config sock calls onEvent = forever $ do
         Left err ->
           traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
 
-writerLoop :: ClientConfig -> Socket -> TVar Bool -> TBQueue (Message.Request Value) -> IO ()
-writerLoop config sock ready writeQ = do
+writerLoop :: ClientConfig -> SIO.Handle -> TVar Bool -> TBQueue (Message.Request Value) -> IO ()
+writerLoop config h ready writeQ = do
   -- wait for handshake first
   atomically $ readTVar ready >>= check
   forever do
     req <- atomically $ readTBQueue writeQ
     let encodedReq = encode req
     traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BSL.length encodedReq) <> "): " <> show encodedReq
-    writeFrame sock Frame encodedReq
+    writeFrame h Frame encodedReq
 
 traceLog :: ClientConfig -> String -> IO ()
 traceLog ClientConfig{trace} msg = when trace (traceM $ "[DiscoRip] " <> msg)
