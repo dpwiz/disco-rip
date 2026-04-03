@@ -11,12 +11,16 @@ module DiscoRip.Command
   ) where
 
 import Data.Aeson
+import Data.Aeson.Types (Pair)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Posix.Process (getProcessID)
 
 import DiscoRip.Client
 import DiscoRip.Message
+
+filterEmpty :: [Pair] -> Value
+filterEmpty = object . filter (\(_, v) -> v /= Null && v /= String "")
 
 data ActivityTimestamps = ActivityTimestamps
   { start :: Maybe Int
@@ -32,7 +36,7 @@ data ActivityAssets = ActivityAssets
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivityAssets where
-  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+  toJSON a = filterEmpty
     [ "large_image" .= large_image a
     , "large_text" .= large_text a
     , "small_image" .= small_image a
@@ -52,7 +56,7 @@ data ActivityParty = ActivityParty
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivityParty where
-  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+  toJSON a = filterEmpty
     [ "id" .= partyId a
     , "size" .= size a
     ]
@@ -69,7 +73,7 @@ data ActivitySecrets = ActivitySecrets
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivitySecrets where
-  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+  toJSON a = filterEmpty
     [ "join" .= join a
     , "spectate" .= spectate a
     , "match" .= match a
@@ -111,7 +115,7 @@ mkActivity st det = Activity
   }
 
 instance ToJSON Activity where
-  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+  toJSON a = filterEmpty
     [ "state" .= state a
     , "details" .= details a
     , "timestamps" .= timestamps a
