@@ -26,9 +26,6 @@ import DiscoRip.Frame (readFrame, writeFrame, Opcode(..))
 import DiscoRip.Message
 import DiscoRip.Socket
 
-traceLog :: ClientConfig -> String -> IO ()
-traceLog config msg = when (trace config) (traceM $ "[DiscoRip] " <> msg)
-
 data ClientConfig = ClientConfig
   { clientId :: Text
   , trace :: Bool
@@ -171,3 +168,6 @@ writerLoop config sock writeQ = forever $ do
   let encodedReq = encode req
   traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BL.length encodedReq) <> "): " <> show encodedReq
   writeFrame sock Frame encodedReq
+
+traceLog :: ClientConfig -> String -> IO ()
+traceLog config msg = when (trace config) (traceM $ "[DiscoRip] " <> msg)
