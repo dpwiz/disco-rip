@@ -12,6 +12,7 @@ module DiscoRip.Command
 
 import Data.Aeson
 import Data.Aeson.Types (Pair)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import System.Posix.Process (getProcessID)
@@ -102,10 +103,10 @@ data Activity = Activity
   , buttons :: Maybe [ActivityButton]
   } deriving stock (Show, Eq, Generic)
 
-mkActivity :: Text -> Text -> Activity
+mkActivity :: Maybe Text -> Maybe Text -> Activity
 mkActivity st det = Activity
-  { state = st
-  , details = det
+  { state = fromMaybe "  " st
+  , details = fromMaybe "  " det
   , timestamps = Nothing
   , assets = Nothing
   , party = Nothing
