@@ -22,7 +22,7 @@ main :: IO ()
 main = do
   -- 1. Start the client with your Application ID (Client ID) and a tracing flag
   -- This will automatically look for the IPC socket and manage connection retries in the background.
-  handle <- startClient (ClientConfig "YOUR_DISCORD_CLIENT_ID" False)
+  handle <- startClient (ClientConfig "YOUR_DISCORD_CLIENT_ID" False) print
   waitReady handle
 
   -- 2. Define the activity you want to display

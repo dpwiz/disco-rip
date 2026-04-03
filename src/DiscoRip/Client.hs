@@ -35,20 +35,17 @@ data Handle = Handle
   { clientAsync :: Async ()
   , cast :: Request Value -> IO ()
   , call :: Request Value -> IO Response
-  , eventsQueue :: TBQueue Event
   , ready :: TVar Bool
   , stop :: IO ()
   }
 
-startClient :: ClientConfig -> IO Handle
-startClient config = do
-  events <- newTBQueueIO 16
-  -- We'll use Map Text Response to map from nonce to Response
+startClient :: ClientConfig -> (Event -> IO ())-> IO Handle
+startClient config onEvent = do
   calls <- newTVarIO (mempty :: Map Text Response)
   writeQ <- newTBQueueIO 16
   readyVar <- newTVarIO False
 
-  workerAsync <- async $ workerLoop config writeQ calls events readyVar
+  workerAsync <- async $ workerLoop config writeQ calls onEvent readyVar
   link workerAsync
 
   let
@@ -85,7 +82,6 @@ startClient config = do
     { clientAsync = workerAsync
     , cast = castImpl
     , call = callImpl
-    , eventsQueue = events
     , ready = readyVar
     , stop = cancel workerAsync
     }
@@ -95,8 +91,8 @@ waitReady h = atomically $ do
   r <- readTVar (ready h)
   if r then pure () else retry
 
-workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> TBQueue Event -> TVar Bool -> IO ()
-workerLoop config writeQ calls events readyVar = forever $ do
+workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> (Event -> IO ()) -> TVar Bool -> IO ()
+workerLoop config writeQ calls onEvent readyVar = forever $ do
   traceLog config "Searching for IPC socket..."
   mPath <- findIpcSocket
   case mPath of
@@ -120,7 +116,7 @@ workerLoop config writeQ calls events readyVar = forever $ do
 
           -- After handshake, start reading and writing concurrently.
           -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
-          race_ (readerLoop config sock calls events) (writerLoop config sock writeQ)
+          race_ (readerLoop config sock calls onEvent) (writerLoop config sock writeQ)
         )
       case res of
         Left err -> do
@@ -131,8 +127,8 @@ workerLoop config writeQ calls events readyVar = forever $ do
           traceLog config "Connection closed cleanly."
           pure ()
 
-readerLoop :: ClientConfig -> Socket -> TVar (Map Text Response) -> TBQueue Event -> IO ()
-readerLoop config sock calls events = forever $ do
+readerLoop :: ClientConfig -> Socket -> TVar (Map Text Response) -> (Event -> IO ()) -> IO ()
+readerLoop config sock calls onEvent = forever $ do
   (op, payload) <- readFrame sock
   traceLog config $ "Received frame (Opcode: " <> show op <> ", size: " <> show (BL.length payload) <> "): " <> show payload
   case op of
@@ -159,7 +155,7 @@ readerLoop config sock calls events = forever $ do
       case eitherDecode payload of
         Right (evt :: Event) -> do
           traceLog config $ "Parsed Event: " <> show evt
-          atomically $ writeTBQueue events evt
+          onEvent evt
         Left err -> traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
 
 writerLoop :: ClientConfig -> Socket -> TBQueue (Request Value) -> IO ()
