@@ -1,13 +1,34 @@
+{-# LANGUAGE CPP #-}
 module DiscoRip.Socket
   ( findIpcSocket
   , connectIpc
   ) where
 
-import Control.Exception (try, IOException)
+import Control.Exception (try, IOException, bracket)
 import Data.Maybe (catMaybes)
-import Network.Socket
+import System.IO (Handle, IOMode(..), openFile, hClose, hSetBuffering, BufferMode(..))
 import System.Environment (lookupEnv)
 import System.FilePath ((</>))
+
+#if defined(mingw32_HOST_OS) || defined(__MINGW32__)
+
+findIpcSocket :: IO (Maybe FilePath)
+findIpcSocket = do
+  paths <- getSocketPaths
+  findFirstConnectable paths
+
+connectIpc :: FilePath -> IO Handle
+connectIpc path = do
+  h <- openFile path ReadWriteMode
+  hSetBuffering h NoBuffering
+  pure h
+
+getSocketPaths :: IO [FilePath]
+getSocketPaths = pure [ "\\\\.\\pipe\\discord-ipc-" <> show (i :: Int) | i <- [0..9] ]
+
+#else
+
+import Network.Socket
 
 findIpcSocket :: IO (Maybe FilePath)
 findIpcSocket = do
@@ -18,11 +39,13 @@ findIpcSocket = do
   -- To be safe, we will just return the first one we can successfully connect to.
   findFirstConnectable paths
 
-connectIpc :: FilePath -> IO Socket
+connectIpc :: FilePath -> IO Handle
 connectIpc path = do
   sock <- socket AF_UNIX Stream 0
   connect sock (SockAddrUnix path)
-  pure sock
+  h <- socketToHandle sock ReadWriteMode
+  hSetBuffering h NoBuffering
+  pure h
 
 getSearchPaths :: IO [FilePath]
 getSearchPaths = do
@@ -31,7 +54,7 @@ getSearchPaths = do
   tmp <- lookupEnv "TMP"
   pure (catMaybes [xdgRuntime, tmpDir, tmp] ++ fallbacks)
   where
-    fallbacks = ["/tmp"]
+    fallbacks = ["/tmp", "/run"]
 
 getSocketPaths :: IO [FilePath]
 getSocketPaths = do
@@ -39,6 +62,8 @@ getSocketPaths = do
   pure [base </> sock | base <- bases, sock <- sockets]
   where
     sockets = ["discord-ipc-" <> show (i :: Int) | i <- [0..9]]
+
+#endif
 
 findFirstConnectable :: [FilePath] -> IO (Maybe FilePath)
 findFirstConnectable [] = pure Nothing
@@ -52,9 +77,7 @@ findFirstConnectable (p:ps) = do
 tryConnect :: FilePath -> IO Bool
 tryConnect path = do
   res <- try @IOException do
-    sock <- socket AF_UNIX Stream 0
-    connect sock (SockAddrUnix path)
-    close sock
+    bracket (connectIpc path) hClose (\_ -> pure ())
   case res of
     Left _ -> pure False
     Right _ -> pure True
