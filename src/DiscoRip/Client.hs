@@ -3,6 +3,7 @@ module DiscoRip.Client
   ( ClientConfig(..)
   , Handle(..)
   , startClient
+  , waitReady
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -38,6 +39,7 @@ data Handle = Handle
   , cast :: Request Value -> IO ()
   , call :: Request Value -> IO Response
   , eventsQueue :: TBQueue Event
+  , ready :: TVar Bool
   , stop :: IO ()
   }
 
@@ -47,8 +49,9 @@ startClient config = do
   -- We'll use Map Text Response to map from nonce to Response
   calls <- newTVarIO (mempty :: Map Text Response)
   writeQ <- newTBQueueIO 16
+  readyVar <- newTVarIO False
 
-  workerAsync <- async $ workerLoop config writeQ calls events
+  workerAsync <- async $ workerLoop config writeQ calls events readyVar
   link workerAsync
 
   let
@@ -86,11 +89,17 @@ startClient config = do
     , cast = castImpl
     , call = callImpl
     , eventsQueue = events
+    , ready = readyVar
     , stop = cancel workerAsync
     }
 
-workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> TBQueue Event -> IO ()
-workerLoop config writeQ calls events = forever $ do
+waitReady :: Handle -> IO ()
+waitReady h = atomically $ do
+  r <- readTVar (ready h)
+  if r then pure () else retry
+
+workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> TBQueue Event -> TVar Bool -> IO ()
+workerLoop config writeQ calls events readyVar = forever $ do
   traceLog config "Searching for IPC socket..."
   mPath <- findIpcSocket
   case mPath of
@@ -103,12 +112,14 @@ workerLoop config writeQ calls events = forever $ do
         (connectIpc path)
         (\sock -> do
           traceLog config "Closing IPC socket connection."
+          atomically $ writeTVar readyVar False
           close sock)
         (\sock -> do
           traceLog config "Connected. Sending handshake."
           let
             hs = DiscoRip.Message.Handshake 1 (clientId config)
           writeFrame sock Frame.Handshake (encode hs)
+          atomically $ writeTVar readyVar True
 
           -- After handshake, start reading and writing concurrently.
           -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
@@ -117,6 +128,7 @@ workerLoop config writeQ calls events = forever $ do
       case res of
         Left err -> do
           traceLog config $ "Connection error or disconnected: " <> show err
+          atomically $ writeTVar readyVar False
           threadDelay 5000000 -- wait before reconnect
         Right _ -> do
           traceLog config "Connection closed cleanly."
