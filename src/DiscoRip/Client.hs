@@ -2,29 +2,32 @@
 module DiscoRip.Client
   ( ClientConfig(..)
   , Handle(..)
-  , startClient
+  , start
+  , stop
   , waitReady
   ) where
 
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (async, link, cancel, Async, race_)
 import Control.Concurrent.STM
+
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (Async, async, cancel, race_)
 import Control.Exception (SomeException, try, bracket)
 import Control.Monad (forever, when)
 import Data.Aeson (encode, eitherDecode, Value)
-import Data.ByteString.Lazy qualified as BL
-import Debug.Trace (traceM)
+import Data.ByteString.Lazy qualified as BSL
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.UUID.V4 (nextRandom)
+import Debug.Trace (traceM)
 import Network.Socket (close, Socket)
 
-import DiscoRip.Frame qualified as Frame
 import DiscoRip.Frame (readFrame, writeFrame, Opcode(..))
-import DiscoRip.Message
-import DiscoRip.Socket
+import DiscoRip.Frame qualified as Frame
+import DiscoRip.Message qualified as Message
+import DiscoRip.Socket qualified as Socket
+import System.Posix (getProcessID)
 
 data ClientConfig = ClientConfig
   { clientId :: Text
@@ -32,28 +35,26 @@ data ClientConfig = ClientConfig
   } deriving (Show, Eq)
 
 data Handle = Handle
-  { clientAsync :: Async ()
-  , cast :: Request Value -> IO ()
-  , call :: Request Value -> IO Response
+  { pid :: Int
+  , worker :: Async ()
+  , cast :: Message.Request Value -> IO ()
+  , call :: Message.Request Value -> IO Message.Response
   , ready :: TVar Bool
-  , stop :: IO ()
   }
 
-startClient :: ClientConfig -> (Event -> IO ())-> IO Handle
-startClient config onEvent = do
-  calls <- newTVarIO (mempty :: Map Text Response)
+start :: ClientConfig -> (Message.Event -> IO ())-> IO Handle
+start config onEvent = do
+  pid <- fromIntegral <$> getProcessID
+  calls <- newTVarIO (mempty :: Map Text Message.Response)
   writeQ <- newTBQueueIO 16
   readyVar <- newTVarIO False
 
-  workerAsync <- async $ workerLoop config writeQ calls onEvent readyVar
-  link workerAsync
+  worker <- async $ workerLoop config writeQ calls onEvent readyVar
 
   let
     castImpl req = do
       uuid <- nextRandom
-      let
-        nonce = T.pack (show uuid)
-        req' = req { reqNonce = nonce }
+      let req' = req {Message.reqNonce = T.pack (show uuid)}
       traceLog config $ "Casting request: " <> show req'
       atomically $ writeTBQueue writeQ req'
 
@@ -61,8 +62,7 @@ startClient config onEvent = do
       uuid <- nextRandom
       let
         nonce = T.pack (show uuid)
-        req' = req { reqNonce = nonce }
-
+        req' = req { Message.reqNonce = nonce }
       traceLog config $ "Calling request: " <> show req'
       atomically $ writeTBQueue writeQ req'
       replyVar <- newTVarIO undefined
@@ -79,22 +79,29 @@ startClient config onEvent = do
       pure res
 
   pure Handle
-    { clientAsync = workerAsync
+    { pid
+    , worker = worker
     , cast = castImpl
     , call = callImpl
     , ready = readyVar
-    , stop = cancel workerAsync
     }
 
-waitReady :: Handle -> IO ()
-waitReady h = atomically $ do
-  r <- readTVar (ready h)
-  if r then pure () else retry
+stop :: Handle -> IO ()
+stop Handle{worker} = cancel worker
 
-workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> (Event -> IO ()) -> TVar Bool -> IO ()
-workerLoop config writeQ calls onEvent readyVar = forever $ do
+waitReady :: Handle -> IO ()
+waitReady Handle{ready} = atomically $ readTVar ready >>= check
+
+workerLoop
+  :: ClientConfig
+  -> TBQueue (Message.Request Value)
+  -> TVar (Map Text Message.Response)
+  -> (Message.Event -> IO ())
+  -> TVar Bool
+  -> IO ()
+workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
   traceLog config "Searching for IPC socket..."
-  mPath <- findIpcSocket
+  mPath <- Socket.findIpcSocket
   case mPath of
     Nothing -> do
       traceLog config "IPC socket not found. Retrying in 5 seconds..."
@@ -102,7 +109,7 @@ workerLoop config writeQ calls onEvent readyVar = forever $ do
     Just path -> do
       traceLog config $ "Found IPC socket at: " <> path
       res <- try @SomeException $ bracket
-        (connectIpc path)
+        (Socket.connectIpc path)
         (\sock -> do
           traceLog config "Closing IPC socket connection."
           atomically $ writeTVar readyVar False
@@ -110,7 +117,7 @@ workerLoop config writeQ calls onEvent readyVar = forever $ do
         (\sock -> do
           traceLog config "Connected. Sending handshake."
           let
-            hs = DiscoRip.Message.Handshake 1 (clientId config)
+            hs = Message.Handshake 1 clientId
           writeFrame sock Frame.Handshake (encode hs)
           atomically $ writeTVar readyVar True
 
@@ -127,20 +134,20 @@ workerLoop config writeQ calls onEvent readyVar = forever $ do
           traceLog config "Connection closed cleanly."
           pure ()
 
-readerLoop :: ClientConfig -> Socket -> TVar (Map Text Response) -> (Event -> IO ()) -> IO ()
+readerLoop :: ClientConfig -> Socket -> TVar (Map Text Message.Response) -> (Message.Event -> IO ()) -> IO ()
 readerLoop config sock calls onEvent = forever $ do
   (op, payload) <- readFrame sock
-  traceLog config $ "Received frame (Opcode: " <> show op <> ", size: " <> show (BL.length payload) <> "): " <> show payload
+  traceLog config $ "Received frame (Opcode: " <> show op <> ", size: " <> show (BSL.length payload) <> "): " <> show payload
   case op of
     Frame -> do
       -- Try to parse as Response first
       case eitherDecode payload of
-        Right (res :: Response) ->
-          if T.null (resNonce res) then
+        Right res@Message.Response{resNonce} ->
+          if T.null resNonce then
             tryParseEvent payload
           else do
             traceLog config $ "Parsed Response: " <> show res
-            atomically $ modifyTVar' calls $ Map.insert (resNonce res) res
+            atomically $ modifyTVar' calls $ Map.insert resNonce res
         Left _ -> tryParseEvent payload
     Close -> do
       traceLog config "Discord requested close"
@@ -153,17 +160,18 @@ readerLoop config sock calls onEvent = forever $ do
   where
     tryParseEvent payload =
       case eitherDecode payload of
-        Right (evt :: Event) -> do
+        Right evt -> do
           traceLog config $ "Parsed Event: " <> show evt
           onEvent evt
-        Left err -> traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
+        Left err ->
+          traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
 
-writerLoop :: ClientConfig -> Socket -> TBQueue (Request Value) -> IO ()
+writerLoop :: ClientConfig -> Socket -> TBQueue (Message.Request Value) -> IO ()
 writerLoop config sock writeQ = forever $ do
   req <- atomically $ readTBQueue writeQ
   let encodedReq = encode req
-  traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BL.length encodedReq) <> "): " <> show encodedReq
+  traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BSL.length encodedReq) <> "): " <> show encodedReq
   writeFrame sock Frame encodedReq
 
 traceLog :: ClientConfig -> String -> IO ()
-traceLog config msg = when (trace config) (traceM $ "[DiscoRip] " <> msg)
+traceLog ClientConfig{trace} msg = when trace (traceM $ "[DiscoRip] " <> msg)

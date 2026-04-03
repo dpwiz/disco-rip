@@ -1,28 +1,25 @@
-name:                disco-rip
-version:             0.1.0.0
-github:              "dpwiz/disco-rip"
-license:             BSD-3-Clause
-author:              "IC Rainbow"
-maintainer:          "aenor.realm@gmail.com"
-copyright:           "2026 IC Rainbow"
+name: disco-rip
+version: 0.1.0.0
+github: "dpwiz/disco-rip"
+license: BSD-3-Clause
+author: "IC Rainbow"
+maintainer: "aenor.realm@gmail.com"
+copyright: "2026 IC Rainbow"
 
 extra-source-files:
 - README.md
 - CHANGELOG.md
 
-# Metadata used when publishing your package
-# synopsis:            Short description of your package
-# category:            Web
+synopsis: Discord RPC client, mostly for RichPresence
+category: Web
 
-# To avoid duplicated efforts in documentation and dealing with the
-# complications of embedding Haddock markup inside cabal files, it is
-# common to point users to the README.md file.
-description:         Please see the README on GitHub at <https://github.com/dpwiz/disco-rip#readme>
+# description: |
+#
 
 dependencies:
-- base >= 4.7 && < 5
 - aeson
 - async
+- base >= 4.7 && < 5
 - binary
 - bytestring
 - containers
@@ -32,17 +29,11 @@ dependencies:
 - random
 - stm
 - text
-- uuid
 - unix
+- uuid
 
 library:
   source-dirs: src
-  exposed-modules:
-  - DiscoRip.Frame
-  - DiscoRip.Message
-  - DiscoRip.Socket
-  - DiscoRip.Client
-  - DiscoRip.Command
 
 language: GHC2021
 default-extensions:
@@ -54,7 +45,10 @@ default-extensions:
 - DerivingVia
 - ImportQualifiedPost
 - LambdaCase
+- NamedFieldPuns
+- NoFieldSelectors
 - OverloadedStrings
+- RecordWildCards
 - StrictData
 
 ghc-options:

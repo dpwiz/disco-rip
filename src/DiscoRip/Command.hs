@@ -1,24 +1,24 @@
 module DiscoRip.Command
-  ( Activity(..)
+  ( mkActivity
+  , Activity(..)
   , ActivityTimestamps(..)
   , ActivityAssets(..)
   , ActivityParty(..)
   , ActivitySecrets(..)
   , ActivityButton(..)
-  , SetActivityArgs(..)
   , setActivity
-  , mkActivity
+  , SetActivityArgs(..)
   ) where
 
 import Data.Aeson
+
 import Data.Aeson.Types (Pair)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import System.Posix.Process (getProcessID)
 
-import DiscoRip.Client
-import DiscoRip.Message
+import DiscoRip.Message qualified as Message
+import DiscoRip.Client qualified as Client
 
 filterEmpty :: [Pair] -> Value
 filterEmpty = object . filter (\(_, v) -> v /= Null && v /= String "")
@@ -37,11 +37,11 @@ data ActivityAssets = ActivityAssets
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivityAssets where
-  toJSON a = filterEmpty
-    [ "large_image" .= large_image a
-    , "large_text" .= large_text a
-    , "small_image" .= small_image a
-    , "small_text" .= small_text a
+  toJSON ActivityAssets{..} = filterEmpty
+    [ "large_image" .= large_image
+    , "large_text" .= large_text
+    , "small_image" .= small_image
+    , "small_text" .= small_text
     ]
 
 instance FromJSON ActivityAssets where
@@ -57,9 +57,9 @@ data ActivityParty = ActivityParty
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivityParty where
-  toJSON a = filterEmpty
-    [ "id" .= partyId a
-    , "size" .= size a
+  toJSON ActivityParty{..} = filterEmpty
+    [ "id" .= partyId
+    , "size" .= size
     ]
 
 instance FromJSON ActivityParty where
@@ -74,10 +74,10 @@ data ActivitySecrets = ActivitySecrets
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON ActivitySecrets where
-  toJSON a = filterEmpty
-    [ "join" .= join a
-    , "spectate" .= spectate a
-    , "match" .= match a
+  toJSON ActivitySecrets{..} = filterEmpty
+    [ "join" .= join
+    , "spectate" .= spectate
+    , "match" .= match
     ]
 
 instance FromJSON ActivitySecrets where
@@ -116,15 +116,15 @@ mkActivity st det = Activity
   }
 
 instance ToJSON Activity where
-  toJSON a = filterEmpty
-    [ "state" .= state a
-    , "details" .= details a
-    , "timestamps" .= timestamps a
-    , "assets" .= assets a
-    , "party" .= party a
-    , "secrets" .= secrets a
-    , "instance" .= instance_ a
-    , "buttons" .= buttons a
+  toJSON Activity{..} = filterEmpty
+    [ "state" .= state
+    , "details" .= details
+    , "timestamps" .= timestamps
+    , "assets" .= assets
+    , "party" .= party
+    , "secrets" .= secrets
+    , "instance" .= instance_
+    , "buttons" .= buttons
     ]
 
 instance FromJSON Activity where
@@ -144,10 +144,7 @@ data SetActivityArgs = SetActivityArgs
   } deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
-setActivity :: Handle -> Activity -> IO Response
-setActivity h act = do
-  pidNum <- getProcessID
-  let
-    args = SetActivityArgs (fromIntegral pidNum) act
-    req = Request "SET_ACTIVITY" (toJSON args) ""
-  call h req
+setActivity :: Client.Handle -> Activity -> IO Message.Response
+setActivity Client.Handle{call, pid} act = do
+  let args = SetActivityArgs pid act
+  call $ Message.Request "SET_ACTIVITY" (toJSON args) ""

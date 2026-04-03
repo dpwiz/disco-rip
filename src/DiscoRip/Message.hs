@@ -22,10 +22,10 @@ data Request a = Request
   } deriving stock (Show, Eq, Generic)
 
 instance ToJSON a => ToJSON (Request a) where
-  toJSON req = object
-    [ "cmd" .= reqCmd req
-    , "args" .= reqArgs req
-    , "nonce" .= reqNonce req
+  toJSON Request{..} = object
+    [ "cmd" .= reqCmd
+    , "args" .= reqArgs
+    , "nonce" .= reqNonce
     ]
 
 data Response = Response

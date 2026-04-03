@@ -6,7 +6,8 @@ cabal-version: 2.2
 
 name:           disco-rip
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/dpwiz/disco-rip#readme>
+synopsis:       Discord RPC client, mostly for RichPresence
+category:       Web
 homepage:       https://github.com/dpwiz/disco-rip#readme
 bug-reports:    https://github.com/dpwiz/disco-rip/issues
 author:         IC Rainbow
@@ -25,13 +26,12 @@ source-repository head
 
 library
   exposed-modules:
+      DiscoRip.Client
+      DiscoRip.Command
       DiscoRip.Frame
       DiscoRip.Message
       DiscoRip.Socket
-      DiscoRip.Client
-      DiscoRip.Command
   other-modules:
-      Lib
       Paths_disco_rip
   autogen-modules:
       Paths_disco_rip
@@ -46,7 +46,10 @@ library
       DerivingVia
       ImportQualifiedPost
       LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
       OverloadedStrings
+      RecordWildCards
       StrictData
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
