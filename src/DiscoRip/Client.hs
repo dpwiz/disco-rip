@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module DiscoRip.Client
-  ( Handle(..)
+  ( ClientConfig(..)
+  , Handle(..)
   , startClient
   ) where
 
@@ -8,8 +9,10 @@ import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, link, cancel, Async, race_)
 import Control.Concurrent.STM
 import Control.Exception (SomeException, try, bracket)
-import Control.Monad (forever)
+import Control.Monad (forever, when)
 import Data.Aeson (encode, eitherDecode, Value)
+import Data.ByteString.Lazy qualified as BL
+import Debug.Trace (traceM)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -22,6 +25,14 @@ import DiscoRip.Frame (readFrame, writeFrame, Opcode(..))
 import DiscoRip.Message
 import DiscoRip.Socket
 
+traceLog :: ClientConfig -> String -> IO ()
+traceLog config msg = when (trace config) (traceM $ "[DiscoRip] " <> msg)
+
+data ClientConfig = ClientConfig
+  { clientId :: Text
+  , trace :: Bool
+  } deriving (Show, Eq)
+
 data Handle = Handle
   { clientAsync :: Async ()
   , cast :: Request Value -> IO ()
@@ -30,14 +41,14 @@ data Handle = Handle
   , stop :: IO ()
   }
 
-startClient :: Text -> IO Handle
-startClient clientId = do
+startClient :: ClientConfig -> IO Handle
+startClient config = do
   events <- newTBQueueIO 16
   -- We'll use Map Text Response to map from nonce to Response
   calls <- newTVarIO (mempty :: Map Text Response)
   writeQ <- newTBQueueIO 16
 
-  workerAsync <- async $ workerLoop clientId writeQ calls events
+  workerAsync <- async $ workerLoop config writeQ calls events
   link workerAsync
 
   let
@@ -46,6 +57,7 @@ startClient clientId = do
       let
         nonce = T.pack (show uuid)
         req' = req { reqNonce = nonce }
+      traceLog config $ "Casting request: " <> show req'
       atomically $ writeTBQueue writeQ req'
 
     callImpl req = do
@@ -54,6 +66,7 @@ startClient clientId = do
         nonce = T.pack (show uuid)
         req' = req { reqNonce = nonce }
 
+      traceLog config $ "Calling request: " <> show req'
       atomically $ writeTBQueue writeQ req'
       replyVar <- newTVarIO undefined
 
@@ -62,8 +75,11 @@ startClient clientId = do
           Just r -> Nothing <$ writeTVar replyVar r
           Nothing -> retry
 
+      traceLog config $ "Waiting for response with nonce: " <> show nonce
       atomically $ readTVar calls >>= popOrRetry nonce >>= writeTVar calls
-      readTVarIO replyVar
+      res <- readTVarIO replyVar
+      traceLog config $ "Received response for nonce " <> show nonce <> ": " <> show res
+      pure res
 
   pure Handle
     { clientAsync = workerAsync
@@ -73,32 +89,43 @@ startClient clientId = do
     , stop = cancel workerAsync
     }
 
-workerLoop :: Text -> TBQueue (Request Value) -> TVar (Map Text Response) -> TBQueue Event -> IO ()
-workerLoop clientId writeQ calls events = forever $ do
+workerLoop :: ClientConfig -> TBQueue (Request Value) -> TVar (Map Text Response) -> TBQueue Event -> IO ()
+workerLoop config writeQ calls events = forever $ do
+  traceLog config "Searching for IPC socket..."
   mPath <- findIpcSocket
   case mPath of
     Nothing -> do
+      traceLog config "IPC socket not found. Retrying in 5 seconds..."
       threadDelay 5000000 -- 5 seconds before retrying
     Just path -> do
+      traceLog config $ "Found IPC socket at: " <> path
       res <- try @SomeException $ bracket
         (connectIpc path)
-        close
         (\sock -> do
+          traceLog config "Closing IPC socket connection."
+          close sock)
+        (\sock -> do
+          traceLog config "Connected. Sending handshake."
           let
-            hs = DiscoRip.Message.Handshake 1 clientId
+            hs = DiscoRip.Message.Handshake 1 (clientId config)
           writeFrame sock Frame.Handshake (encode hs)
 
           -- After handshake, start reading and writing concurrently.
           -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
-          race_ (readerLoop sock calls events) (writerLoop sock writeQ)
+          race_ (readerLoop config sock calls events) (writerLoop config sock writeQ)
         )
       case res of
-        Left _err -> threadDelay 5000000 -- wait before reconnect
-        Right _ -> pure ()
+        Left err -> do
+          traceLog config $ "Connection error or disconnected: " <> show err
+          threadDelay 5000000 -- wait before reconnect
+        Right _ -> do
+          traceLog config "Connection closed cleanly."
+          pure ()
 
-readerLoop :: Socket -> TVar (Map Text Response) -> TBQueue Event -> IO ()
-readerLoop sock calls events = forever $ do
+readerLoop :: ClientConfig -> Socket -> TVar (Map Text Response) -> TBQueue Event -> IO ()
+readerLoop config sock calls events = forever $ do
   (op, payload) <- readFrame sock
+  traceLog config $ "Received frame (Opcode: " <> show op <> ", size: " <> show (BL.length payload) <> "): " <> show payload
   case op of
     Frame -> do
       -- Try to parse as Response first
@@ -106,21 +133,29 @@ readerLoop sock calls events = forever $ do
         Right (res :: Response) ->
           if T.null (resNonce res) then
             tryParseEvent payload
-          else
+          else do
+            traceLog config $ "Parsed Response: " <> show res
             atomically $ modifyTVar' calls $ Map.insert (resNonce res) res
         Left _ -> tryParseEvent payload
-    Close -> error "Discord requested close"
+    Close -> do
+      traceLog config "Discord requested close"
+      error "Discord requested close"
     Ping -> do
+      traceLog config "Received Ping, responding with Pong."
       -- respond with Pong
       writeFrame sock Pong payload
     _ -> pure ()
   where
     tryParseEvent payload =
       case eitherDecode payload of
-        Right (evt :: Event) -> atomically $ writeTBQueue events evt
-        Left _ -> pure ()
+        Right (evt :: Event) -> do
+          traceLog config $ "Parsed Event: " <> show evt
+          atomically $ writeTBQueue events evt
+        Left err -> traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
 
-writerLoop :: Socket -> TBQueue (Request Value) -> IO ()
-writerLoop sock writeQ = forever $ do
+writerLoop :: ClientConfig -> Socket -> TBQueue (Request Value) -> IO ()
+writerLoop config sock writeQ = forever $ do
   req <- atomically $ readTBQueue writeQ
-  writeFrame sock Frame (encode req)
+  let encodedReq = encode req
+  traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BL.length encodedReq) <> "): " <> show encodedReq
+  writeFrame sock Frame encodedReq
