@@ -25,25 +25,61 @@ data ActivityTimestamps = ActivityTimestamps
   deriving anyclass (ToJSON, FromJSON)
 
 data ActivityAssets = ActivityAssets
-  { large_image :: Maybe Text
-  , large_text :: Maybe Text
-  , small_image :: Maybe Text
-  , small_text :: Maybe Text
+  { large_image :: Text
+  , large_text :: Text
+  , small_image :: Text
+  , small_text :: Text
   } deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+
+instance ToJSON ActivityAssets where
+  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+    [ "large_image" .= large_image a
+    , "large_text" .= large_text a
+    , "small_image" .= small_image a
+    , "small_text" .= small_text a
+    ]
+
+instance FromJSON ActivityAssets where
+  parseJSON = withObject "ActivityAssets" $ \v -> ActivityAssets
+    <$> v .:? "large_image" .!= ""
+    <*> v .:? "large_text" .!= ""
+    <*> v .:? "small_image" .!= ""
+    <*> v .:? "small_text" .!= ""
 
 data ActivityParty = ActivityParty
-  { id :: Maybe Text
+  { partyId :: Text
   , size :: Maybe [Int]
   } deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+
+instance ToJSON ActivityParty where
+  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+    [ "id" .= partyId a
+    , "size" .= size a
+    ]
+
+instance FromJSON ActivityParty where
+  parseJSON = withObject "ActivityParty" $ \v -> ActivityParty
+    <$> v .:? "id" .!= ""
+    <*> v .:? "size"
 
 data ActivitySecrets = ActivitySecrets
-  { join :: Maybe Text
-  , spectate :: Maybe Text
-  , match :: Maybe Text
+  { join :: Text
+  , spectate :: Text
+  , match :: Text
   } deriving stock (Show, Eq, Generic)
-  deriving anyclass (ToJSON, FromJSON)
+
+instance ToJSON ActivitySecrets where
+  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
+    [ "join" .= join a
+    , "spectate" .= spectate a
+    , "match" .= match a
+    ]
+
+instance FromJSON ActivitySecrets where
+  parseJSON = withObject "ActivitySecrets" $ \v -> ActivitySecrets
+    <$> v .:? "join" .!= ""
+    <*> v .:? "spectate" .!= ""
+    <*> v .:? "match" .!= ""
 
 data ActivityButton = ActivityButton
   { label :: Text
@@ -52,8 +88,8 @@ data ActivityButton = ActivityButton
   deriving anyclass (ToJSON, FromJSON)
 
 data Activity = Activity
-  { state :: Maybe Text
-  , details :: Maybe Text
+  { state :: Text
+  , details :: Text
   , timestamps :: Maybe ActivityTimestamps
   , assets :: Maybe ActivityAssets
   , party :: Maybe ActivityParty
@@ -62,9 +98,9 @@ data Activity = Activity
   , buttons :: Maybe [ActivityButton]
   } deriving stock (Show, Eq, Generic)
 
-mkActivity :: Text -> Maybe Text -> Activity
+mkActivity :: Text -> Text -> Activity
 mkActivity st det = Activity
-  { state = Just st
+  { state = st
   , details = det
   , timestamps = Nothing
   , assets = Nothing
@@ -75,7 +111,7 @@ mkActivity st det = Activity
   }
 
 instance ToJSON Activity where
-  toJSON a = object $ filter (\(_, v) -> v /= Null)
+  toJSON a = object $ filter (\(_, v) -> v /= Null && v /= String "")
     [ "state" .= state a
     , "details" .= details a
     , "timestamps" .= timestamps a
@@ -88,8 +124,8 @@ instance ToJSON Activity where
 
 instance FromJSON Activity where
   parseJSON = withObject "Activity" $ \v -> Activity
-    <$> v .:? "state"
-    <*> v .:? "details"
+    <$> v .:? "state" .!= ""
+    <*> v .:? "details" .!= ""
     <*> v .:? "timestamps"
     <*> v .:? "assets"
     <*> v .:? "party"
