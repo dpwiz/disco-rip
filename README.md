@@ -20,9 +20,9 @@ import DiscoRip.Command
 
 main :: IO ()
 main = do
-  -- 1. Start the client with your Application ID (Client ID)
+  -- 1. Start the client with your Application ID (Client ID) and a tracing flag
   -- This will automatically look for the IPC socket and manage connection retries in the background.
-  handle <- startClient "YOUR_DISCORD_CLIENT_ID"
+  handle <- startClient (ClientConfig "YOUR_DISCORD_CLIENT_ID" False)
 
   -- Give the async worker a moment to handshake with Discord
   threadDelay 1000000
