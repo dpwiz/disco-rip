@@ -11,6 +11,7 @@ import Data.Binary (Binary(..), encode, decodeOrFail)
 import Data.Binary.Get (getWord32le)
 import Data.Binary.Put (putWord32le)
 import Data.ByteString.Lazy qualified as BL
+import Data.ByteString.Lazy.Internal qualified as BLI
 import Data.ByteString qualified as BS
 import Data.Word (Word32)
 import Network.Socket (Socket)
@@ -81,12 +82,13 @@ writeFrame sock op payload = do
   sendAll sock frame
 
 recvExactly :: Socket -> Int -> IO BL.ByteString
-recvExactly sock n = go n mempty
+recvExactly sock n = go n
   where
-    go 0 acc = pure (BL.fromChunks (reverse acc))
-    go k acc = do
+    go 0 = pure BLI.Empty
+    go k = do
       chunk <- recv sock k
       if BS.null chunk then
         error "Socket closed unexpectedly while receiving"
-      else
-        go (k - BS.length chunk) (chunk : acc)
+      else do
+        rest <- go (k - BS.length chunk)
+        pure (BLI.Chunk chunk rest)
