@@ -32,6 +32,16 @@ library
       Paths_disco_rip
   hs-source-dirs:
       src
+  default-extensions:
+      ApplicativeDo
+      BlockArguments
+      DeriveGeneric
+      DerivingStrategies
+      DerivingVia
+      ImportQualifiedPost
+      LambdaCase
+      OverloadedStrings
+      StrictData
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
@@ -41,4 +51,4 @@ library
     , network
     , random
     , text
-  default-language: Haskell2010
+  default-language: GHC2021

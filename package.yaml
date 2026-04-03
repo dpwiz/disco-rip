@@ -28,6 +28,21 @@ dependencies:
 - random
 - text
 
+library:
+  source-dirs: src
+
+language: GHC2021
+default-extensions:
+- ApplicativeDo
+- BlockArguments
+- DeriveGeneric
+- DerivingStrategies
+- DerivingVia
+- ImportQualifiedPost
+- LambdaCase
+- OverloadedStrings
+- StrictData
+
 ghc-options:
 - -Wall
 - -Wcompat
@@ -38,6 +53,3 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
-
-library:
-  source-dirs: src
