@@ -25,8 +25,13 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
+      DiscoRip.Frame
+      DiscoRip.Message
+      DiscoRip.Socket
+      DiscoRip.Client
+      DiscoRip.Command
   other-modules:
+      Lib
       Paths_disco_rip
   autogen-modules:
       Paths_disco_rip
@@ -35,6 +40,7 @@ library
   default-extensions:
       ApplicativeDo
       BlockArguments
+      DeriveAnyClass
       DeriveGeneric
       DerivingStrategies
       DerivingVia
@@ -45,10 +51,16 @@ library
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
   build-depends:
       aeson
+    , async
     , base >=4.7 && <5
+    , binary
     , bytestring
     , containers
+    , directory
+    , filepath
     , network
     , random
+    , stm
     , text
+    , uuid
   default-language: GHC2021

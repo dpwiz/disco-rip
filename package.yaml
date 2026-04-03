@@ -22,19 +22,32 @@ description:         Please see the README on GitHub at <https://github.com/dpwi
 dependencies:
 - base >= 4.7 && < 5
 - aeson
+- async
+- binary
 - bytestring
 - containers
+- directory
+- filepath
 - network
 - random
+- stm
 - text
+- uuid
 
 library:
   source-dirs: src
+  exposed-modules:
+  - DiscoRip.Frame
+  - DiscoRip.Message
+  - DiscoRip.Socket
+  - DiscoRip.Client
+  - DiscoRip.Command
 
 language: GHC2021
 default-extensions:
 - ApplicativeDo
 - BlockArguments
+- DeriveAnyClass
 - DeriveGeneric
 - DerivingStrategies
 - DerivingVia
