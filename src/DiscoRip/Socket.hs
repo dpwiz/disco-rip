@@ -5,12 +5,12 @@ module DiscoRip.Socket
   ) where
 
 import Control.Exception (try, IOException, bracket)
-import Data.Maybe (catMaybes)
-import System.IO (Handle, IOMode(..), openFile, hClose, hSetBuffering, BufferMode(..))
+import System.IO (Handle, IOMode(..), hClose, hSetBuffering, BufferMode(..))
 import System.Environment (lookupEnv)
-import System.FilePath ((</>))
 
 #if defined(mingw32_HOST_OS) || defined(__MINGW32__)
+
+import System.IO (openFile)
 
 findIpcSocket :: IO (Maybe FilePath)
 findIpcSocket = do
@@ -28,7 +28,9 @@ getSocketPaths = pure [ "\\\\.\\pipe\\discord-ipc-" <> show (i :: Int) | i <- [0
 
 #else
 
+import Data.Maybe (catMaybes)
 import Network.Socket
+import System.FilePath ((</>))
 
 findIpcSocket :: IO (Maybe FilePath)
 findIpcSocket = do
