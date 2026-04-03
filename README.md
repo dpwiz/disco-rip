@@ -23,9 +23,7 @@ main = do
   -- 1. Start the client with your Application ID (Client ID) and a tracing flag
   -- This will automatically look for the IPC socket and manage connection retries in the background.
   handle <- startClient (ClientConfig "YOUR_DISCORD_CLIENT_ID" False)
-
-  -- Give the async worker a moment to handshake with Discord
-  threadDelay 1000000
+  waitReady handle
 
   -- 2. Define the activity you want to display
   -- Use mkActivity to quickly create an Activity with just state and optional details
