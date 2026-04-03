@@ -76,10 +76,7 @@ readFrame sock = do
       pure (op, payload)
 
 writeFrame :: Socket -> Opcode -> BL.ByteString -> IO ()
-writeFrame sock op payload = do
-  let
-    frame = encodeFrame op payload
-  sendAll sock frame
+writeFrame sock op = sendAll sock . encodeFrame op
 
 recvExactly :: Socket -> Int -> IO BL.ByteString
 recvExactly sock n = go n

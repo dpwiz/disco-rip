@@ -119,11 +119,12 @@ workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
           let
             hs = Message.Handshake 1 clientId
           writeFrame sock Frame.Handshake (encode hs)
+          waitReadyEvent config sock onEvent
           atomically $ writeTVar readyVar True
 
           -- After handshake, start reading and writing concurrently.
           -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
-          race_ (readerLoop config sock calls onEvent) (writerLoop config sock writeQ)
+          race_ (readerLoop config sock calls onEvent) (writerLoop config sock readyVar writeQ)
         )
       case res of
         Left err -> do
@@ -133,6 +134,20 @@ workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
         Right _ -> do
           traceLog config "Connection closed cleanly."
           pure ()
+
+waitReadyEvent :: ClientConfig -> Socket -> (Message.Event -> IO ()) -> IO ()
+waitReadyEvent config sock onEvent = do
+  traceLog config "Waiting for READY event"
+  readFrame sock >>= \case
+    (Frame, payload) ->
+      case eitherDecode payload of
+        Right evt@Message.Event{evtEvt="READY"} -> do
+          traceLog config "Got READY event"
+          onEvent evt
+        huh ->
+          error $ show huh
+    (op, payload) ->
+      error $ show (op, payload)
 
 readerLoop :: ClientConfig -> Socket -> TVar (Map Text Message.Response) -> (Message.Event -> IO ()) -> IO ()
 readerLoop config sock calls onEvent = forever $ do
@@ -148,7 +163,8 @@ readerLoop config sock calls onEvent = forever $ do
           else do
             traceLog config $ "Parsed Response: " <> show res
             atomically $ modifyTVar' calls $ Map.insert resNonce res
-        Left _ -> tryParseEvent payload
+        Left _ ->
+          tryParseEvent payload
     Close -> do
       traceLog config "Discord requested close"
       error "Discord requested close"
@@ -166,12 +182,15 @@ readerLoop config sock calls onEvent = forever $ do
         Left err ->
           traceLog config $ "Failed to parse frame payload as Event or Response: " <> err
 
-writerLoop :: ClientConfig -> Socket -> TBQueue (Message.Request Value) -> IO ()
-writerLoop config sock writeQ = forever $ do
-  req <- atomically $ readTBQueue writeQ
-  let encodedReq = encode req
-  traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BSL.length encodedReq) <> "): " <> show encodedReq
-  writeFrame sock Frame encodedReq
+writerLoop :: ClientConfig -> Socket -> TVar Bool -> TBQueue (Message.Request Value) -> IO ()
+writerLoop config sock ready writeQ = do
+  -- wait for handshake first
+  atomically $ readTVar ready >>= check
+  forever do
+    req <- atomically $ readTBQueue writeQ
+    let encodedReq = encode req
+    traceLog config $ "Writing frame (Opcode: Frame, size: " <> show (BSL.length encodedReq) <> "): " <> show encodedReq
+    writeFrame sock Frame encodedReq
 
 traceLog :: ClientConfig -> String -> IO ()
 traceLog ClientConfig{trace} msg = when trace (traceM $ "[DiscoRip] " <> msg)
