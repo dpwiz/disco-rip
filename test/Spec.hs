@@ -14,13 +14,13 @@ spec = do
     it "reconnect loop backs off and dies after stop" $ do
       let config = ClientConfig "test-client" False True
       -- Start the client, it will enter workerLoop and try to connect
-      handle <- start config (\_ -> pure ())
+      handle@Handle{worker} <- start config (\_ -> pure ())
 
       -- Wait a short while so it hits some backoffs
       threadDelay 2000000 -- 2 seconds
 
       -- It should still be alive
-      status1 <- poll (getWorker handle)
+      status1 <- poll worker
       case status1 of
         Nothing -> pure ()
         Just _ -> expectationFailure "Worker should still be alive"
@@ -32,7 +32,7 @@ spec = do
       threadDelay 1000000 -- 1 second
 
       -- It should be dead now
-      status2 <- poll (getWorker handle)
+      status2 <- poll worker
       case status2 of
         Nothing -> expectationFailure "Worker should be dead"
         Just _ -> pure ()

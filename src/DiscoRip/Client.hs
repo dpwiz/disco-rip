@@ -6,7 +6,6 @@ module DiscoRip.Client
   , start
   , stop
   , waitReady
-  , getWorker
   ) where
 
 import Control.Concurrent.STM
@@ -59,9 +58,6 @@ data Handle = Handle
   , ready :: TVar Bool
   , reconnectVar :: TVar Bool
   }
-
-getWorker :: Handle -> Async ()
-getWorker Handle{worker} = worker
 
 start :: ClientConfig -> (Message.Event -> IO ())-> IO Handle
 start config@ClientConfig{reconnect} onEvent = do
