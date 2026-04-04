@@ -108,10 +108,11 @@ test-suite disco-rip-test
     , directory
     , disco-rip
     , filepath
-    , hspec
     , network
     , random
     , stm
+    , tasty
+    , tasty-hunit
     , text
     , uuid
   default-language: GHC2021
