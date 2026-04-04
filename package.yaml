@@ -65,3 +65,12 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
+
+tests:
+  disco-rip-test:
+    main: Spec.hs
+    source-dirs: test
+    dependencies:
+    - disco-rip
+    - tasty
+    - tasty-hunit

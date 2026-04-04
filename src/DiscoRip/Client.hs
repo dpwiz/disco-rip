@@ -23,6 +23,7 @@ import Data.Text qualified as T
 import Data.UUID.V4 (nextRandom)
 import Debug.Trace (traceM)
 import System.IO (hClose)
+import System.Random (randomRIO)
 import qualified System.IO as SIO
 
 import DiscoRip.Frame (readFrame, writeFrame, Opcode(..))
@@ -46,6 +47,7 @@ myGetProcessID = fromIntegral <$> getProcessID
 data ClientConfig = ClientConfig
   { clientId :: Text
   , trace :: Bool
+  , reconnect :: Bool
   } deriving (Show, Eq)
 
 data Handle = Handle
@@ -54,16 +56,18 @@ data Handle = Handle
   , cast :: Message.Request Value -> IO ()
   , call :: Message.Request Value -> IO Message.Response
   , ready :: TVar Bool
+  , reconnectVar :: TVar Bool
   }
 
 start :: ClientConfig -> (Message.Event -> IO ())-> IO Handle
-start config onEvent = do
+start config@ClientConfig{reconnect} onEvent = do
   pid <- myGetProcessID
   calls <- newTVarIO (mempty :: Map Text Message.Response)
   writeQ <- newTBQueueIO 16
   readyVar <- newTVarIO False
+  reconnectVar <- newTVarIO reconnect
 
-  worker <- async $ workerLoop config writeQ calls onEvent readyVar
+  worker <- async $ workerLoop config writeQ calls onEvent readyVar reconnectVar
 
   let
     castImpl req = do
@@ -98,10 +102,13 @@ start config onEvent = do
     , cast = castImpl
     , call = callImpl
     , ready = readyVar
+    , reconnectVar = reconnectVar
     }
 
 stop :: Handle -> IO ()
-stop Handle{worker} = cancel worker
+stop Handle{worker, reconnectVar} = do
+  atomically $ writeTVar reconnectVar False
+  cancel worker
 
 waitReady :: Handle -> IO ()
 waitReady Handle{ready} = atomically $ readTVar ready >>= check
@@ -112,42 +119,62 @@ workerLoop
   -> TVar (Map Text Message.Response)
   -> (Message.Event -> IO ())
   -> TVar Bool
+  -> TVar Bool
   -> IO ()
-workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar = forever $ do
-  traceLog config "Searching for IPC socket..."
-  mPath <- Socket.findIpcSocket
-  case mPath of
-    Nothing -> do
-      traceLog config "IPC socket not found. Retrying in 5 seconds..."
-      threadDelay 5000000 -- 5 seconds before retrying
-    Just path -> do
-      traceLog config $ "Found IPC socket at: " <> path
-      res <- try @SomeException $ bracket
-        (Socket.connectIpc path)
-        (\h -> do
-          traceLog config "Closing IPC socket connection."
-          atomically $ writeTVar readyVar False
-          hClose h)
-        (\h -> do
-          traceLog config "Connected. Sending handshake."
-          let
-            hs = Message.Handshake 1 clientId
-          writeFrame h Frame.Handshake (encode hs)
-          waitReadyEvent config h onEvent
-          atomically $ writeTVar readyVar True
+workerLoop config@ClientConfig{..} writeQ calls onEvent readyVar reconnectVar = loop 1.0
+  where
+    loop :: Double -> IO ()
+    loop delay = do
+      shouldRun <- atomically $ readTVar reconnectVar
+      when shouldRun $ do
+        traceLog config "Searching for IPC socket..."
+        mPath <- Socket.findIpcSocket
+        case mPath of
+          Nothing -> do
+            traceLog config $ "IPC socket not found. Retrying in " <> show delay <> " seconds..."
+            sleepWithJitter delay
+            loop (min 60.0 (delay * 2))
+          Just path -> do
+            traceLog config $ "Found IPC socket at: " <> path
+            res <- try @SomeException $ bracket
+              (Socket.connectIpc path)
+              (\h -> do
+                traceLog config "Closing IPC socket connection."
+                atomically $ writeTVar readyVar False
+                hClose h)
+              (\h -> do
+                traceLog config "Connected. Sending handshake."
+                let
+                  hs = Message.Handshake 1 clientId
+                writeFrame h Frame.Handshake (encode hs)
+                waitReadyEvent config h onEvent
+                atomically $ writeTVar readyVar True
 
-          -- After handshake, start reading and writing concurrently.
-          -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
-          race_ (readerLoop config h calls onEvent) (writerLoop config h readyVar writeQ)
-        )
-      case res of
-        Left err -> do
-          traceLog config $ "Connection error or disconnected: " <> show err
-          atomically $ writeTVar readyVar False
-          threadDelay 5000000 -- wait before reconnect
-        Right _ -> do
-          traceLog config "Connection closed cleanly."
-          pure ()
+                -- After handshake, start reading and writing concurrently.
+                -- If either throws an exception (e.g. pipe closed), they both die and we reconnect.
+                race_ (readerLoop config h calls onEvent) (writerLoop config h readyVar writeQ)
+              )
+            case res of
+              Left err -> do
+                traceLog config $ "Connection error or disconnected: " <> show err
+                atomically $ writeTVar readyVar False
+                shouldRun' <- atomically $ readTVar reconnectVar
+                when shouldRun' $ do
+                  sleepWithJitter delay
+                  loop (min 60.0 (delay * 2))
+              Right _ -> do
+                traceLog config "Connection closed cleanly."
+                shouldRun' <- atomically $ readTVar reconnectVar
+                when shouldRun' $ do
+                  -- reset backoff
+                  sleepWithJitter 1.0
+                  loop 1.0
+
+    sleepWithJitter :: Double -> IO ()
+    sleepWithJitter delaySec = do
+      let microSec = delaySec * 1000000
+      jitter <- randomRIO (-0.01 * microSec, 0.01 * microSec)
+      threadDelay (round (microSec + jitter))
 
 waitReadyEvent :: ClientConfig -> SIO.Handle -> (Message.Event -> IO ()) -> IO ()
 waitReadyEvent config h onEvent = do

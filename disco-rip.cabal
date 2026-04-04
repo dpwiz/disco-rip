@@ -73,3 +73,52 @@ library
   if !os(windows)
     build-depends:
         unix
+
+test-suite disco-rip-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_disco_rip
+  autogen-modules:
+      Paths_disco_rip
+  hs-source-dirs:
+      test
+  default-extensions:
+      ApplicativeDo
+      BlockArguments
+      DeriveAnyClass
+      DeriveGeneric
+      DerivingStrategies
+      DerivingVia
+      ImportQualifiedPost
+      LambdaCase
+      NamedFieldPuns
+      NoFieldSelectors
+      OverloadedStrings
+      RecordWildCards
+      StrictData
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , async
+    , base >=4.7 && <5
+    , binary
+    , bytestring
+    , containers
+    , directory
+    , disco-rip
+    , filepath
+    , network
+    , random
+    , stm
+    , tasty
+    , tasty-hunit
+    , text
+    , uuid
+  default-language: GHC2021
+  if os(windows)
+    build-depends:
+        Win32
+  if !os(windows)
+    build-depends:
+        unix
